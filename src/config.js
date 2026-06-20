@@ -12,6 +12,13 @@ const config = {
     enabled: process.env.CORS_ENABLED !== "false",
     credentials: process.env.CORS_CREDENTIALS !== "false",
     maxAge: Number(process.env.CORS_MAX_AGE ?? 86_400),
+    allowedOrigins: (
+      process.env.CORS_ALLOWED_ORIGINS ??
+      "https://gabrielvelasco.github.io,http://localhost:4173,http://127.0.0.1:4173"
+    )
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
   },
   cache: {
     /**

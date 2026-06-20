@@ -15,6 +15,16 @@ import config from "./config.js";
 // Shared cache instance (lives for the lifetime of the process)
 const cache = new TTLCache();
 
+function upstreamBodyPreview(data) {
+  if (typeof data === "string") return data.slice(0, 300);
+
+  try {
+    return JSON.stringify(data).slice(0, 300);
+  } catch {
+    return "[unserializable upstream body]";
+  }
+}
+
 // Purge stale entries every minute so the Map never grows unboundedly
 setInterval(() => cache.purgeExpired(), 60_000).unref();
 
@@ -83,11 +93,18 @@ export default async function routes(fastify) {
       }
 
       try {
-        const { data, status } = await sofaFetch(
+        const { data, status, url, contentType } = await sofaFetch(
           "/sport/football/events/live"
         );
 
         if (status >= 400) {
+          req.log.warn({
+            upstreamStatus: status,
+            upstreamUrl: url,
+            upstreamContentType: contentType,
+            upstreamBodyPreview: upstreamBodyPreview(data),
+          }, "SofaScore upstream rejected live events request");
+
           return reply.status(status).send({
             error: "Upstream error",
             upstream_status: status,
@@ -130,7 +147,7 @@ export default async function routes(fastify) {
       }
 
       try {
-        const { data, status } = await sofaFetch(
+        const { data, status, url, contentType } = await sofaFetch(
           `/event/${eventId}/statistics`
         );
 
@@ -142,6 +159,14 @@ export default async function routes(fastify) {
         }
 
         if (status >= 400) {
+          req.log.warn({
+            upstreamStatus: status,
+            upstreamUrl: url,
+            upstreamContentType: contentType,
+            upstreamBodyPreview: upstreamBodyPreview(data),
+            eventId,
+          }, "SofaScore upstream rejected event stats request");
+
           return reply.status(status).send({
             error: "Upstream error",
             upstream_status: status,

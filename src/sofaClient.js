@@ -26,6 +26,7 @@
  */
 
 import { chromium } from "playwright-core";
+import { existsSync } from "node:fs";
 
 const SOFA_BASE = "https://www.sofascore.com/api/v1";
 
@@ -34,26 +35,53 @@ const SPOOF_HEADERS = {
   "x-requested-with": "XMLHttpRequest",
   "accept": "application/json, text/plain, */*",
   "accept-language": "en-US,en;q=0.9",
-  "referer": "https://www.sofascore.com/",
-  "origin": "https://www.sofascore.com",
 };
 
 /** @type {import('playwright-core').Browser | null} */
 let browser = null;
 /** @type {import('playwright-core').Page | null} */
 let page = null;
+/** @type {Promise<import('playwright-core').Page> | null} */
+let pagePromise = null;
+
+function resolveChromeExecutablePath() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+  ].filter(Boolean);
+
+  const executablePath = candidates.find((path) => existsSync(path));
+  if (!executablePath) {
+    throw new Error(
+      "Google Chrome executable not found. Checked: " + candidates.join(", ") + ". " +
+      "Install google-chrome-stable on the host, use the Dockerfile-based Elastic Beanstalk platform, " +
+      "or set CHROME_PATH to the installed Chrome executable."
+    );
+  }
+
+  return executablePath;
+}
+
+async function getPage() {
+  if (page) return page;
+  if (pagePromise) return pagePromise;
+
+  pagePromise = createPage().catch((err) => {
+    pagePromise = null;
+    throw err;
+  });
+
+  return pagePromise;
+}
 
 /**
  * Lazily initialise (and cache) the browser + page singleton.
  * Called once at first request; subsequent calls return immediately.
  */
-async function getPage() {
-  if (page) return page;
-
+async function createPage() {
   // Use the system-installed Google Chrome for maximum TLS fingerprint fidelity
-  const executablePath =
-    process.env.CHROME_PATH ??
-    "/usr/bin/google-chrome";
+  const executablePath = resolveChromeExecutablePath();
 
   browser = await chromium.launch({
     executablePath,
@@ -71,12 +99,18 @@ async function getPage() {
     ],
   });
 
+  const chromeVersion = browser.version().replace("Chrome/", "");
+
   const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
-      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    // Navigate to SofaScore once so the page origin is correct
-    baseURL: "https://www.sofascore.com/api/v1/sport/football",
+      "(KHTML, like Gecko) Chrome/" + chromeVersion + " Safari/537.36",
+    locale: "en-US",
+    timezoneId: "America/New_York",
+    extraHTTPHeaders: {
+      "accept-language": "en-US,en;q=0.9",
+    },
+    baseURL: "https://www.sofascore.com",
   });
 
   page = await context.newPage();
@@ -84,7 +118,7 @@ async function getPage() {
   // Open the SofaScore home page so subsequent fetch() calls share its origin
   // and session cookies (if any).  We ignore errors (e.g. JS exceptions on the
   // page) because we only care about the network layer.
-  await page.goto("https://www.sofascore.com/api/v1/sport/football", {
+  await page.goto("https://www.sofascore.com/", {
     waitUntil: "domcontentloaded",
     timeout: 30_000,
   }).catch(() => {/* ignore page-level errors */});
@@ -112,7 +146,12 @@ export async function sofaFetch(path) {
         ? await res.json()
         : await res.text();
 
-      return { data, status: res.status };
+      return {
+        data,
+        status: res.status,
+        url: res.url,
+        contentType,
+      };
     },
     { url, headers: SPOOF_HEADERS }
   );
@@ -126,5 +165,6 @@ export async function closeBrowser() {
     await browser.close().catch(() => {});
     browser = null;
     page = null;
+    pagePromise = null;
   }
 }

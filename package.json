@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "NODE_ENV=development node server.js"
+    "dev": "NODE_ENV=development node server.js",
+    "publish": "node scripts/publish-local.js"
   },
   "keywords": [
     "sofascore",
